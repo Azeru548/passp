@@ -1,0 +1,9 @@
+# Netlify serves the static export produced by `next build` (output: "export").
+# The app has no backend, so we opt out of Netlify's automatic Next.js runtime:
+# left on, it overrides the publish directory to `.next` and the deploy fails.
+[build]
+  command = "npm run build"
+  publish = "out"
+
+[build.environment]
+  NETLIFY_NEXT_PLUGIN_SKIP = "true"
