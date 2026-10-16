@@ -57,6 +57,9 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  /* stop mobile browsers inflating text after an orientation change */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 h1,
@@ -78,6 +81,8 @@ button {
 
 .app {
   min-height: 100vh;
+  /* dvh accounts for the mobile URL bar, so the page doesn't scroll a few px */
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
 }
@@ -846,15 +851,129 @@ button {
 }
 
 /* ---------- responsive ---------- */
+
+/* Tablet / narrow desktop: one column, the page scrolls instead of panes. */
 @media (max-width: 980px) {
   .workspace {
     grid-template-columns: 1fr;
   }
   .panel {
     max-height: none;
+    overflow: visible;
   }
   .page-frame {
     max-height: none;
+  }
+  /*
+   * Single column, so size the sheet from the column width. The viewport-height
+   * cap used on desktop would shrink it to almost nothing in landscape.
+   */
+  .sheet-wrap {
+    width: min(430px, 100%);
+  }
+}
+
+/* Phones */
+@media (max-width: 700px) {
+  .workspace {
+    gap: 12px;
+    padding: 12px;
+  }
+
+  /* Header stacks; the status chip gets its own full-width line. */
+  .topbar {
+    flex-wrap: wrap;
+    padding: 12px 14px;
+  }
+  .chip {
+    width: 100%;
+    white-space: normal;
+    text-align: center;
+  }
+
+  .panel {
+    padding: 4px 14px 14px;
+  }
+  .group {
+    padding: 15px 0;
+  }
+  .group-head {
+    flex-wrap: wrap;
+  }
+
+  /* Fingers, not a mouse: grow the small tap targets. */
+  .scope button {
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+  .ghost {
+    padding: 10px 14px;
+  }
+  .batch-remove {
+    font-size: 20px;
+    padding: 5px 12px;
+  }
+  .swatch::before {
+    width: 40px;
+    height: 40px;
+  }
+
+  /* Short, wide rows: give the field room and let the row wrap. */
+  .inline {
+    flex-wrap: wrap;
+  }
+  .inline > span {
+    flex: 0 0 96px;
+  }
+
+  /* 16px stops iOS Safari zooming the page when a field is focused. */
+  .inline input[type="number"],
+  .inline select,
+  .mini input,
+  .batch-name {
+    font-size: 16px;
+  }
+
+  .stage {
+    min-height: 0;
+  }
+  .stage-head {
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    padding: 10px 14px;
+  }
+  .page-frame {
+    min-height: 300px;
+    /* must stay wider than the 13px crop marks that sit outside the sheet */
+    padding: 18px;
+  }
+  .dropzone img {
+    max-height: 170px;
+  }
+
+  /* Print full width; the two downloads share the row beneath it. */
+  .actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    padding: 14px 14px 0;
+  }
+  .actions .primary {
+    grid-column: 1 / -1;
+  }
+  .actions button {
+    padding: 13px 12px;
+  }
+
+  .batch-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .batch-actions button {
+    padding: 10px 12px;
+  }
+
+  .footnote {
+    padding: 12px 14px 0;
   }
 }
 
