@@ -83,23 +83,41 @@ async function downscale(file: File, maxDim = 2000): Promise<Blob> {
   }
 }
 
+/** Rough stage the background remover is in. */
+type RemovalPhase = "download" | "remove";
+
+type RemovalProgress = {
+  phase: RemovalPhase;
+  /** 0–100 */
+  percent: number;
+};
+
+/** What the loading overlay is currently showing. */
+type LoaderState = {
+  title: string;
+  detail?: string;
+  /** `null` renders an indeterminate bar. */
+  percent: number | null;
+};
+
 /**
  * Removes the background entirely inside the browser. The first call downloads
  * the model (cached afterwards); no server, no upload, no per-image cost.
  */
-async function removeBgOnDevice(blob: Blob, onStatus: (message: string) => void): Promise<Blob> {
+async function removeBgOnDevice(
+  blob: Blob,
+  onProgress: (progress: RemovalProgress) => void
+): Promise<Blob> {
   const { removeBackground } = await import("@imgly/background-removal");
   return removeBackground(blob, {
     model: BG_MODEL,
     output: { format: "image/png" },
     progress: (key: string, current: number, total: number) => {
       if (!total) return;
-      const pct = Math.round((current / total) * 100);
-      onStatus(
-        key.startsWith("fetch")
-          ? `Downloading the background remover… ${pct}% (one time only)`
-          : `Removing the background… ${pct}%`
-      );
+      onProgress({
+        phase: key.startsWith("fetch") ? "download" : "remove",
+        percent: Math.max(0, Math.min(100, Math.round((current / total) * 100)))
+      });
     }
   });
 }
@@ -136,7 +154,7 @@ export default function PassportStudio() {
   const [activeId, setActiveId] = useState<string | null>(null);
 
   const [processing, setProcessing] = useState(false);
-  const [status, setStatus] = useState("");
+  const [loader, setLoader] = useState<LoaderState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
 
@@ -248,10 +266,35 @@ export default function PassportStudio() {
 
   // ---- background removal queue (one image at a time, to protect weak PCs) ----
   const processOne = useCallback(
-    async (item: BatchItem) => {
+    async (item: BatchItem, pos: { index: number; total: number }) => {
+      const where = pos.total > 1 ? `${item.name} · photo ${pos.index} of ${pos.total}` : item.name;
+
       updateItem(item.id, { status: "working", error: undefined });
+      setLoader({ title: "Removing the background", detail: where, percent: 0 });
+
       try {
-        const cut = await removeBgOnDevice(item.blob, (m) => setStatus(`${item.name}: ${m}`));
+        const cut = await removeBgOnDevice(item.blob, (p) => {
+          // The first photo also pulls the model down the wire, once ever.
+          const next: LoaderState =
+            p.phase === "download"
+              ? {
+                  title: "Downloading the background remover",
+                  detail: "One-time download — afterwards it runs offline",
+                  percent: p.percent
+                }
+              : { title: "Removing the background", detail: where, percent: p.percent };
+          // This callback fires very often; identical values bail out of the
+          // re-render so a weak machine isn't re-rendering while it should be
+          // crunching the image.
+          setLoader((prev) =>
+            prev &&
+            prev.title === next.title &&
+            prev.detail === next.detail &&
+            prev.percent === next.percent
+              ? prev
+              : next
+          );
+        });
         const url = URL.createObjectURL(cut);
         const el = await loadImage(url);
         updateItem(item.id, { imageEl: el, status: "done", usedFallback: false });
@@ -272,13 +315,17 @@ export default function PassportStudio() {
     if (runningRef.current) return;
     runningRef.current = true;
     setProcessing(true);
+    let done = 0;
     while (queueRef.current.length) {
       const next = queueRef.current.shift();
-      if (next) await processOne(next);
+      if (!next) continue;
+      // Recomputed each pass so photos added mid-run are counted in the total.
+      await processOne(next, { index: done + 1, total: done + 1 + queueRef.current.length });
+      done += 1;
     }
     runningRef.current = false;
     setProcessing(false);
-    setStatus("");
+    setLoader(null);
   }, [processOne]);
 
   const enqueue = useCallback(
@@ -299,7 +346,11 @@ export default function PassportStudio() {
       }
       setError(null);
       setPreparing(true);
-      setStatus("Preparing images…");
+      setLoader({
+        title: "Preparing photos",
+        detail: `Reading ${images.length} file${images.length === 1 ? "" : "s"}…`,
+        percent: null
+      });
 
       const created: BatchItem[] = [];
       for (const file of images) {
@@ -326,14 +377,13 @@ export default function PassportStudio() {
       setPreparing(false);
 
       if (!created.length) {
-        setStatus("");
+        setLoader(null);
         setError("None of those files could be read.");
         return;
       }
 
       setItems((prev) => [...prev, ...created]);
       setActiveId((prev) => prev ?? created[0].id);
-      setStatus("");
       enqueue(created);
     },
     [enqueue]
@@ -473,6 +523,11 @@ export default function PassportStudio() {
   const totalPhotos = photosPerRow * rows;
   const hasImage = Boolean(active?.imageEl);
 
+  // Stays up for the whole prepare → remove cycle, so it never blinks off
+  // in the gap between the two stages.
+  const busy = processing || preparing;
+  const shown: LoaderState | null = loader ?? (busy ? { title: "Working…", percent: null } : null);
+
   return (
     <div className="app">
       <header className="topbar">
@@ -538,7 +593,6 @@ export default function PassportStudio() {
               />
             </div>
 
-            {(processing || preparing) && <p className="hint busy">{status || "Working…"}</p>}
             {error && <p className="hint error">{error}</p>}
 
             {items.length > 0 && (
@@ -897,6 +951,38 @@ export default function PassportStudio() {
               </div>
             )}
             {!hasImage && <canvas ref={canvasRef} hidden />}
+
+            {shown && (
+              <div className="loader">
+                {/* announces the phase, not every percent tick */}
+                <span className="sr-only" role="status">
+                  {shown.title}
+                </span>
+                <div className="loader-card">
+                  <div className="loader-ring" aria-hidden="true" />
+                  <div className="loader-copy">
+                    <p className="loader-title">{shown.title}</p>
+                    {shown.detail && <p className="loader-detail">{shown.detail}</p>}
+                  </div>
+                  <div
+                    className={`loader-bar ${shown.percent === null ? "indeterminate" : ""}`}
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={shown.percent ?? undefined}
+                    aria-label={shown.title}
+                  >
+                    <span
+                      className="loader-fill"
+                      style={
+                        shown.percent === null ? undefined : { width: `${shown.percent}%` }
+                      }
+                    />
+                  </div>
+                  {shown.percent !== null && <span className="loader-pct">{shown.percent}%</span>}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="actions">
