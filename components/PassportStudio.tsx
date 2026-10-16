@@ -137,6 +137,65 @@ function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob | null> {
   return new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
 }
 
+/**
+ * A number field you can actually type in. It holds the raw text while you
+ * type and only clamps on blur/Enter.
+ *
+ * Clamping on every keystroke is the classic trap: clearing the field reads as
+ * 0, snaps to the minimum, and then the digits you type get appended to that
+ * ("1" + "3" = 13 → clamped to the maximum). On a phone keypad it's unusable.
+ */
+function NumberField({
+  value,
+  min,
+  max,
+  step,
+  label,
+  onCommit
+}: {
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  label?: string;
+  onCommit: (value: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+
+  // Follow external changes (a preset, or a clamp when the options shrink).
+  useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
+
+  const commit = () => {
+    const parsed = Number(draft);
+    if (draft.trim() === "" || !Number.isFinite(parsed)) {
+      setDraft(String(value)); // nothing usable typed — put the old value back
+      return;
+    }
+    const bounded = Math.min(Math.max(parsed, min), max);
+    onCommit(bounded);
+    setDraft(String(bounded));
+  };
+
+  return (
+    <input
+      type="number"
+      inputMode="decimal"
+      aria-label={label}
+      min={min}
+      max={max}
+      step={step}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+      }}
+    />
+  );
+}
+
 const today = () => new Date().toISOString().slice(0, 10);
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
 const safeName = (name: string, index: number) =>
@@ -816,13 +875,16 @@ export default function PassportStudio() {
 
             <label className="inline">
               <span>Photos per row</span>
-              <input
-                type="number"
-                min={1}
-                max={maxN}
+              <select
                 value={photosPerRow}
-                onChange={(e) => setPhotosPerRow(clamp(Number(e.target.value) || 1, 1, maxN))}
-              />
+                onChange={(e) => setPhotosPerRow(Number(e.target.value))}
+              >
+                {Array.from({ length: maxN }, (_, i) => i + 1).map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
               <em className="muted">max {maxN}</em>
             </label>
 
@@ -834,13 +896,12 @@ export default function PassportStudio() {
               </select>
               {rowsMode === "manual" && (
                 <>
-                  <input
-                    type="number"
-                    aria-label="Number of rows"
+                  <NumberField
+                    label="Number of rows"
+                    value={manualRows}
                     min={1}
                     max={autoRows}
-                    value={manualRows}
-                    onChange={(e) => setManualRows(clamp(Number(e.target.value) || 1, 1, autoRows))}
+                    onCommit={setManualRows}
                   />
                   <em className="muted">max {autoRows}</em>
                 </>
@@ -877,44 +938,19 @@ export default function PassportStudio() {
             <div className="mini-grid">
               <label className="mini">
                 <span>Width (mm)</span>
-                <input
-                  type="number"
-                  min={15}
-                  max={100}
-                  value={photoW}
-                  onChange={(e) => setPhotoW(clamp(Number(e.target.value) || 15, 15, 100))}
-                />
+                <NumberField value={photoW} min={15} max={100} onCommit={setPhotoW} />
               </label>
               <label className="mini">
                 <span>Height (mm)</span>
-                <input
-                  type="number"
-                  min={15}
-                  max={120}
-                  value={photoH}
-                  onChange={(e) => setPhotoH(clamp(Number(e.target.value) || 15, 15, 120))}
-                />
+                <NumberField value={photoH} min={15} max={120} onCommit={setPhotoH} />
               </label>
               <label className="mini">
                 <span>Margin (mm)</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={25}
-                  value={marginMm}
-                  onChange={(e) => setMarginMm(clamp(Number(e.target.value) || 0, 0, 25))}
-                />
+                <NumberField value={marginMm} min={0} max={25} onCommit={setMarginMm} />
               </label>
               <label className="mini">
                 <span>Row gap (mm)</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={15}
-                  step={0.5}
-                  value={gapMm}
-                  onChange={(e) => setGapMm(clamp(Number(e.target.value) || 0, 0, 15))}
-                />
+                <NumberField value={gapMm} min={0} max={15} step={0.5} onCommit={setGapMm} />
               </label>
             </div>
 

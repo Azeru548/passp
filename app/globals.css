@@ -677,9 +677,9 @@ button {
 .page-frame {
   flex: 1;
   display: flex;
-  /* `safe` keeps the top reachable if the sheet ever outgrows the frame */
-  align-items: center;
-  align-items: safe center;
+  /* The sheet sits at the top of the frame, matching the rows inside it —
+     vertical centring also made an overflowing sheet unreachable at the top. */
+  align-items: flex-start;
   justify-content: center;
   padding: 34px;
   overflow: auto;
